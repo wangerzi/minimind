@@ -82,7 +82,7 @@ def train_epoch(epoch, wandb):
         if (step + 1) % args.save_interval == 0 and (not ddp or dist.get_rank() == 0):
             model.eval()
             moe_path = '_moe' if lm_config.use_moe else ''
-            ckp = f'{args.save_dir}/pretrain_{lm_config.hidden_size}{moe_path}.pth'
+            ckp = f'{args.save_dir}/{args.output_model_name or f"pretrain_{lm_config.hidden_size}{moe_path}"}.pth'
 
             if isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 state_dict = model.module.state_dict()
@@ -97,6 +97,21 @@ def train_epoch(epoch, wandb):
 def init_model(lm_config):
     tokenizer = AutoTokenizer.from_pretrained('../model/')
     model = MiniMindForCausalLM(lm_config).to(args.device)
+    
+    # 如果指定了已有模型路径，则加载模型权重
+    if args.load_model_path is not None:
+        if os.path.exists(args.load_model_path):
+            Logger(f'加载已有模型: {args.load_model_path}')
+            state_dict = torch.load(args.load_model_path, map_location=args.device)
+            # 处理可能的半精度模型权重
+            state_dict = {k: v.float() if v.dtype == torch.float16 else v for k, v in state_dict.items()}
+            model.load_state_dict(state_dict, strict=False)
+            Logger('模型权重加载完成，继续预训练')
+        else:
+            Logger(f'警告: 指定的模型路径不存在 {args.load_model_path}，将从头开始训练')
+    else:
+        Logger('从头开始训练新模型')
+    
     Logger(f'LLM可训练总参数量：{sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} 百万')
     return model, tokenizer
 
@@ -137,7 +152,14 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden_layers', default=8, type=int)
     parser.add_argument('--max_seq_len', default=512, type=int)
     parser.add_argument('--use_moe', default=False, type=bool)
-    parser.add_argument("--data_path", type=str, default="../dataset/pretrain_hq.jsonl")
+    parser.add_argument("--data_path", type=str, nargs='+', default=["../dataset/pretrain_hq.jsonl"], 
+                        help="数据路径，支持多个文件，例如: --data_path file1.jsonl file2.jsonl")
+    parser.add_argument("--load_model_path", type=str, default=None,
+                        help="指定已有模型路径进行继续训练，不指定则从头开始训练")
+    parser.add_argument("--output_model_name", type=str, default=None,
+                        help="指定输出模型的名称，不指定则使用默认名称")
+    parser.add_argument("--shuffle_data", action="store_true", 
+                        help="是否打乱训练数据，默认不打乱")
     args = parser.parse_args()
 
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=args.use_moe)
@@ -175,13 +197,13 @@ if __name__ == "__main__":
 
     model, tokenizer = init_model(lm_config)
     train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
-    train_sampler = DistributedSampler(train_ds) if ddp else None
+    train_sampler = DistributedSampler(train_ds, shuffle=args.shuffle_data) if ddp else None
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,
         pin_memory=True,
         drop_last=False,
-        shuffle=False,
+        shuffle=args.shuffle_data and not ddp,  # 只有在非分布式训练时才使用shuffle
         num_workers=args.num_workers,
         sampler=train_sampler
     )
@@ -194,5 +216,18 @@ if __name__ == "__main__":
         model = DistributedDataParallel(model, device_ids=[ddp_local_rank])
 
     iter_per_epoch = len(train_loader)
+
+    # 打印数据打乱状态
+    if args.shuffle_data:
+        if ddp:
+            Logger("数据打乱: 启用 (分布式训练模式)")
+        else:
+            Logger("数据打乱: 启用 (单机训练模式)")
+    else:
+        Logger("数据打乱: 禁用")
+
     for epoch in range(args.epochs):
+        # 在分布式训练中，为每个epoch设置不同的随机种子
+        if ddp and train_sampler is not None:
+            train_sampler.set_epoch(epoch)
         train_epoch(epoch, wandb)

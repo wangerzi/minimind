@@ -18,14 +18,23 @@ class PretrainDataset(Dataset):
         super().__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.samples = self.load_data(data_path)
+        # 支持单个路径或多个路径
+        if isinstance(data_path, str):
+            data_paths = [data_path]
+        else:
+            data_paths = data_path
+        self.samples = self.load_data(data_paths)
 
-    def load_data(self, path):
+    def load_data(self, paths):
         samples = []
-        with open(path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                data = json.loads(line.strip())
-                samples.append(data)
+        for path in paths:
+            print(f"加载数据集: {path}")
+            with open(path, 'r', encoding='utf-8') as f:
+                for line_num, line in enumerate(f, 1):
+                    data = json.loads(line.strip())
+                    samples.append(data)
+            print(f"从 {path} 加载了 {line_num} 条数据")
+        print(f"总共加载了 {len(samples)} 条数据")
         return samples
 
     def __len__(self):
