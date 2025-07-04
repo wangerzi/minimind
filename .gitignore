@@ -1,4 +1,6 @@
-/model/__pycache__
-/dataset
+__pycache__
+/dataset/*.jsonl
+/dataset/*.txt
+/dataset/*.json
 /out
 eval_logs/

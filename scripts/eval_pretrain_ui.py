@@ -10,12 +10,12 @@ import random
 import numpy as np
 import sys
 import gc
+from transformers import AutoTokenizer
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from transformers import AutoTokenizer
 from model.model_minimind import MiniMindConfig, MiniMindForCausalLM
+
 
 warnings.filterwarnings('ignore')
 
@@ -246,73 +246,97 @@ def main():
     st.title("🧠 MiniMind预训练模型评估工具")
     st.markdown("---")
     
-    # 侧边栏：模型选择
-    with st.sidebar:
-        st.header("🔧 模型配置")
+    # 创建标签页
+    tab1, tab2, tab3 = st.tabs(["🔧 模型管理", "🧪 模型测试", "📊 历史结果"])
+    
+    with tab1:
+        st.header("模型管理")
         
         # 获取可用模型
         available_models = get_available_pretrain_models()
         
         if not available_models:
             st.error("未找到预训练模型文件，请确保out目录下有pretrain_*.pth文件")
-            return
-        
-        # 模型选择
-        model_options = ["请选择模型"] + available_models
-        selected_model = st.selectbox(
-            "选择预训练模型",
-            model_options,
-            index=0
-        )
-        
-        # 模型参数配置
-        hidden_size = st.selectbox(
-            "Hidden Size",
-            [512, 640, 768],
-            index=0
-        )
-        
-        num_hidden_layers = st.selectbox(
-            "Hidden Layers",
-            [8, 16],
-            index=0
-        )
-        
-        use_moe = st.checkbox("使用MoE")
-        
-        # 当选择改变时加载模型
-        if selected_model != "请选择模型":
-            model_path = f"./out/{selected_model}"
-            current_selection = f"{selected_model}_{hidden_size}_{num_hidden_layers}_{use_moe}"
-            
-            if (st.session_state.current_model_path != model_path or 
-                st.session_state.get('current_config') != current_selection):
-                
-                with st.spinner("正在加载模型..."):
-                    success, message = load_model(model_path, hidden_size, num_hidden_layers, use_moe)
-                    if success:
-                        st.success(message)
-                        st.session_state.current_config = current_selection
-                    else:
-                        st.error(message)
-        
-        # 显示当前模型状态
-        if st.session_state.current_model is not None:
-            st.success("✅ 模型已加载")
-            st.info(f"当前模型: {os.path.basename(st.session_state.current_model_path)}")
         else:
-            st.warning("⚠️ 未加载模型")
+            # 模型选择区域
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.subheader("选择模型")
+                
+                # 模型选择
+                model_options = ["请选择模型"] + available_models
+                selected_model = st.selectbox(
+                    "选择预训练模型",
+                    model_options,
+                    index=0
+                )
+                
+                # 模型参数配置
+                col_param1, col_param2, col_param3 = st.columns(3)
+                with col_param1:
+                    hidden_size = st.selectbox(
+                        "Hidden Size",
+                        [512, 640, 768],
+                        index=0
+                    )
+                
+                with col_param2:
+                    num_hidden_layers = st.selectbox(
+                        "Hidden Layers",
+                        [8, 16],
+                        index=0
+                    )
+                
+                with col_param3:
+                    use_moe = st.checkbox("使用MoE")
+                
+                # 模型操作按钮
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    load_button = st.button("🔄 加载模型", type="primary", disabled=(selected_model == "请选择模型"))
+                with col_btn2:
+                    unload_button = st.button("🗑️ 卸载模型", disabled=(st.session_state.current_model is None))
+                
+                # 处理加载模型
+                if load_button and selected_model != "请选择模型":
+                    model_path = f"./out/{selected_model}"
+                    with st.spinner("正在加载模型..."):
+                        success, message = load_model(model_path, hidden_size, num_hidden_layers, use_moe)
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                
+                # 处理卸载模型
+                if unload_button:
+                    unload_current_model()
+                    st.success("模型已卸载")
+                    st.rerun()
+            
+            with col2:
+                st.subheader("当前状态")
+                # 显示当前模型状态
+                if st.session_state.current_model is not None:
+                    st.success("✅ 模型已加载")
+                    st.info(f"模型: {os.path.basename(st.session_state.current_model_path)}")
+                    
+                    # 显示模型参数信息
+                    param_count = sum(p.numel() for p in st.session_state.current_model.parameters() if p.requires_grad) / 1e6
+                    st.metric("参数量", f"{param_count:.2f}M")
+                else:
+                    st.warning("⚠️ 未加载模型")
+                    st.info("请选择模型并点击加载按钮")
     
-    # 主界面
-    if st.session_state.current_model is None:
-        st.warning("请先在侧边栏选择并加载模型")
-        return
-    
-    # 创建标签页
-    tab1, tab2 = st.tabs(["🧪 模型测试", "📊 历史结果"])
-    
-    with tab1:
+    with tab2:
         st.header("模型测试")
+        
+        # 检查是否有加载的模型
+        if st.session_state.current_model is None:
+            st.warning("⚠️ 请先在『模型管理』标签页中加载模型")
+            st.info("💡 提示：切换到『模型管理』标签页，选择模型并点击『加载模型』按钮")
+            return
         
         # 测试输入区域
         col1, col2 = st.columns([3, 1])
@@ -415,51 +439,75 @@ def main():
             model_name = os.path.basename(st.session_state.current_model_path).replace('.pth', '')
             saved_file = save_evaluation_results(all_results, model_name, test_note)
             st.success(f"测试结果已保存到: {saved_file}")
-            
-            # # 显示结果
-            # with results_container:
-            #     st.subheader("测试结果")
-            #     for i, result in enumerate(all_results):
-            #         with st.expander(f"第{result['run']}轮 - {result['prompt'][:50]}..."):
-            #             st.text_area(
-            #                 f"输入 (第{result['run']}轮)",
-            #                 result['prompt'],
-            #                 height=60,
-            #                 disabled=True
-            #             )
-            #             st.text_area(
-            #                 "输出",
-            #                 result['response'],
-            #                 height=120,
-            #                 disabled=True
-            #             )
     
-    with tab2:
+    with tab3:
         st.header("历史测试结果")
         
         # 加载历史数据
         history_data = load_evaluation_history()
         
         if not history_data:
-            st.info("暂无历史测试结果")
+            st.info("📋 暂无历史测试结果")
+            st.markdown("💡 **提示**: 在『模型测试』标签页中运行测试后，结果会显示在这里")
             return
         
-        # 选择历史文件
-        history_options = [
-            f"{item['timestamp']} - {item['model_name']} ({item['num_tests']}个测试)" + 
-            (f" - {item['note'][:30]}..." if item['note'] and len(item['note']) > 30 else f" - {item['note']}" if item['note'] else "")
-            for item in history_data
-        ]
+        # 历史结果管理区域
+        col_select, col_delete = st.columns([4, 1])
         
-        selected_history = st.selectbox(
-            "选择历史结果",
-            range(len(history_options)),
-            format_func=lambda x: history_options[x]
-        )
+        with col_select:
+            # 选择历史文件
+            history_options = [
+                f"{item['timestamp']} - {item['model_name']} ({item['num_tests']}个测试)" + 
+                (f" - {item['note'][:30]}..." if item['note'] and len(item['note']) > 30 else f" - {item['note']}" if item['note'] else "")
+                for item in history_data
+            ]
+            
+            selected_history = st.selectbox(
+                "选择历史结果",
+                range(len(history_options)),
+                format_func=lambda x: history_options[x]
+            )
         
-        if selected_history is not None:
+        with col_delete:
+            st.markdown("　")  # 占位符，对齐选择框
+            delete_button = st.button("🗑️ 删除选中结果", type="secondary")
+        
+        # 处理删除操作
+        if delete_button and selected_history is not None:
+            selected_file_path = history_data[selected_history]['file_path']
+            selected_filename = history_data[selected_history]['filename']
+            
+            # 使用确认对话框
+            if f"confirm_delete_{selected_history}" not in st.session_state:
+                st.session_state[f"confirm_delete_{selected_history}"] = False
+            
+            if not st.session_state[f"confirm_delete_{selected_history}"]:
+                st.warning(f"⚠️ 确认要删除结果文件『{selected_filename}』吗？")
+                col_confirm, col_cancel = st.columns(2)
+                with col_confirm:
+                    if st.button("确认删除", type="primary", key=f"confirm_{selected_history}"):
+                        st.session_state[f"confirm_delete_{selected_history}"] = True
+                        st.rerun()
+                with col_cancel:
+                    if st.button("取消", key=f"cancel_{selected_history}"):
+                        st.rerun()
+            else:
+                try:
+                    os.remove(selected_file_path)
+                    st.success(f"✅ 已删除结果文件: {selected_filename}")
+                    # 清理session state
+                    del st.session_state[f"confirm_delete_{selected_history}"]
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 删除文件失败: {str(e)}")
+                    del st.session_state[f"confirm_delete_{selected_history}"]
+        
+        # 显示选中的历史结果
+        if selected_history is not None and not delete_button:
             selected_data = history_data[selected_history]['data']
             selected_file_path = history_data[selected_history]['file_path']
+            
+            st.markdown("---")
             
             # 显示概览信息
             col1, col2, col3, col4 = st.columns(4)
