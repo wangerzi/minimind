@@ -162,37 +162,20 @@ def get_default_prompts():
         '在化学中，化学反应的速率与',
         '区块链技术的不可篡改性主要依赖于',
         # 《道诡异仙》相关测试
-        '道诡异仙的世界中',
-        '李火旺在现实世界的妻子是',
+        '道诡异仙的世界中，李火旺的身份有',
+        '李娜跟白灵淼的关系',
+        '李岁是李火旺的',
         '袄景教的人修炼功法利用',
-        '高智坚的真实身份是',
-        '袄景教修炼功法的核心原理是',
-        '高智坚的真实身份其实是',
         '坐忘道的修行方式是',
-        '诸葛渊与李火旺的关系本质是',
-        '大梁皇帝司命的秘密是',
         '白玉京的真相是',
         '心素的能力具体表现为',
-        '巴虺的信仰者会',
-        '天陈国的历史隐藏着',
-        '清风观的吕秀才实际上是',
-        "修真境界'坐忘'指的是",
         '李火旺看到的幻觉中经常出现',
-        '兵家修士的修炼需要',
-        '骰子在坐忘道中象征',
-        '大傩的仪式必须包含',
-        '《大千录》记载的禁忌包括',
-        '法教信徒获得力量的方式是',
-        '监天司的创立目的是',
-        '心浊现象的典型特征是',
         '丹阳子成仙的代价是',
-        '腊月十八事件中失踪的',
-        '修真者对抗癫火的方法有',
-        '大齐王朝覆灭的真正原因是',
-        '季灾这个名字暗示了',
-        '无生老母的预言中提到',
-        '玄牝的来历与有关',
-        '幽都的入口隐藏在',
+        '他脑海中想起来正德寺的血肉菩萨，想起来安慈庵的苍蝇观音，以及袄景教那本浑身焦黑的牯神，',
+        '白玉京内掌管着秘密天道的司命有',
+        '当吕状元听到林子里传来的诡异笑声和问题时',
+        '在医院中，李火旺被手铐拷住，'
+        '李火旺向赵秦提出了寻找适合的剑法的请求，'
     ]
 
 def save_evaluation_results(results, model_name, note=""):
@@ -336,7 +319,6 @@ def main():
         if st.session_state.current_model is None:
             st.warning("⚠️ 请先在『模型管理』标签页中加载模型")
             st.info("💡 提示：切换到『模型管理』标签页，选择模型并点击『加载模型』按钮")
-            return
         
         # 测试输入区域
         col1, col2 = st.columns([3, 1])
@@ -412,7 +394,7 @@ def main():
                     if use_fixed_seed:
                         setup_seed(fixed_seed)
                     else:
-                        setup_seed(random.randint(0, 2048))
+                        setup_seed(random.randint(0, 20480))
                     
                     # 生成文本
                     response = generate_text(prompt, max_length, temperature, top_p)
@@ -477,30 +459,8 @@ def main():
             selected_file_path = history_data[selected_history]['file_path']
             selected_filename = history_data[selected_history]['filename']
             
-            # 使用确认对话框
-            if f"confirm_delete_{selected_history}" not in st.session_state:
-                st.session_state[f"confirm_delete_{selected_history}"] = False
-            
-            if not st.session_state[f"confirm_delete_{selected_history}"]:
-                st.warning(f"⚠️ 确认要删除结果文件『{selected_filename}』吗？")
-                col_confirm, col_cancel = st.columns(2)
-                with col_confirm:
-                    if st.button("确认删除", type="primary", key=f"confirm_{selected_history}"):
-                        st.session_state[f"confirm_delete_{selected_history}"] = True
-                        st.rerun()
-                with col_cancel:
-                    if st.button("取消", key=f"cancel_{selected_history}"):
-                        st.rerun()
-            else:
-                try:
-                    os.remove(selected_file_path)
-                    st.success(f"✅ 已删除结果文件: {selected_filename}")
-                    # 清理session state
-                    del st.session_state[f"confirm_delete_{selected_history}"]
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ 删除文件失败: {str(e)}")
-                    del st.session_state[f"confirm_delete_{selected_history}"]
+            os.remove(selected_file_path)
+            st.success(f"✅ 已删除结果文件: {selected_filename}")
         
         # 显示选中的历史结果
         if selected_history is not None and not delete_button:
