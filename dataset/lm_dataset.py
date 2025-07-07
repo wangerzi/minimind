@@ -61,23 +61,42 @@ class PretrainDataset(Dataset):
 
 
 class SFTDataset(Dataset):
-    def __init__(self, jsonl_path, tokenizer, max_length=1024):
+    def __init__(self, data_paths, tokenizer, max_length=1024, shuffle=True):
         super().__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.samples = self.load_data(jsonl_path)
+        self.shuffle = shuffle
+        self.samples = self.load_data(data_paths)
         self.bos_id = tokenizer('<|im_start|>assistant', add_special_tokens=False).input_ids
         self.eos_id = tokenizer('<|im_end|>', add_special_tokens=False).input_ids
 
     def __len__(self):
         return len(self.samples)
 
-    def load_data(self, path):
+    def load_data(self, paths):
+        """支持加载多个数据文件"""
+        # 支持单个路径或多个路径
+        if isinstance(paths, str):
+            paths = [paths]
+        
         samples = []
-        with open(path, 'r', encoding='utf-8') as f:
-            for line_num, line in enumerate(f, 1):
-                data = json.loads(line.strip())
-                samples.append(data)
+        for path in paths:
+            print(f"加载SFT数据集: {path}")
+            with open(path, 'r', encoding='utf-8') as f:
+                file_samples = []
+                for line_num, line in enumerate(f, 1):
+                    data = json.loads(line.strip())
+                    file_samples.append(data)
+                samples.extend(file_samples)
+                print(f"从 {path} 加载了 {len(file_samples)} 条数据")
+        
+        print(f"总共加载了 {len(samples)} 条SFT数据")
+        
+        # 如果需要打乱数据
+        if self.shuffle:
+            random.shuffle(samples)
+            print("已打乱数据顺序")
+        
         return samples
 
     def _create_chat_prompt(self, conversations):
