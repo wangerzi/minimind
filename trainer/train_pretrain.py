@@ -79,19 +79,47 @@ def train_epoch(epoch, wandb):
                            "lr": optimizer.param_groups[-1]['lr'],
                            "epoch_Time": spend_time / (step + 1) * iter_per_epoch // 60 - spend_time // 60})
 
-        if (step + 1) % args.save_interval == 0 and (not ddp or dist.get_rank() == 0):
-            model.eval()
-            moe_path = '_moe' if lm_config.use_moe else ''
+        if (step + 1) % args.save_interval == 0:
+            save_model(model, lm_config, args, step=step)
+
+
+def save_model(model, lm_config, args, epoch=None, step=None):
+    """保存模型的通用函数
+    
+    Args:
+        model: 要保存的模型
+        lm_config: 模型配置
+        args: 命令行参数
+        epoch: 当前epoch（用于按epoch保存）
+        step: 当前step（用于按step保存）
+    """
+    if not ddp or dist.get_rank() == 0:
+        model.eval()
+        moe_path = '_moe' if lm_config.use_moe else ''
+        
+        # 根据保存类型确定文件名
+        if epoch is not None:
+            # 按epoch保存
+            base_name = args.output_model_name or f"pretrain_{lm_config.hidden_size}{moe_path}"
+            ckp = f'{args.save_dir}/{base_name}_ep{epoch + 1}.pth'
+        else:
+            # 按step保存（原有逻辑）
             ckp = f'{args.save_dir}/{args.output_model_name or f"pretrain_{lm_config.hidden_size}{moe_path}"}.pth'
 
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                state_dict = model.module.state_dict()
-            else:
-                state_dict = model.state_dict()
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            state_dict = model.module.state_dict()
+        else:
+            state_dict = model.state_dict()
 
-            state_dict = {k: v.half() for k, v in state_dict.items()}  # 半精度保存
-            torch.save(state_dict, ckp)
-            model.train()
+        state_dict = {k: v.half() for k, v in state_dict.items()}  # 半精度保存
+        torch.save(state_dict, ckp)
+        
+        if epoch is not None:
+            Logger(f'Epoch {epoch + 1} 模型已保存到: {ckp}')
+        else:
+            Logger(f'Step 检查点模型已保存到: {ckp}')
+            
+        model.train()
 
 
 def init_model(lm_config):
@@ -152,6 +180,10 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden_layers', default=8, type=int)
     parser.add_argument('--max_seq_len', default=512, type=int)
     parser.add_argument('--use_moe', default=False, type=bool)
+    parser.add_argument('--num_attention_heads', default=8, type=int,
+                        help="注意力头的数量")
+    parser.add_argument('--num_key_value_heads', default=2, type=int,
+                        help="键值对头的数量，用于分组查询注意力(GQA)")
     parser.add_argument("--data_path", type=str, nargs='+', default=["../dataset/pretrain_hq.jsonl"], 
                         help="数据路径，支持多个文件，例如: --data_path file1.jsonl file2.jsonl")
     parser.add_argument("--load_model_path", type=str, default=None,
@@ -160,9 +192,17 @@ if __name__ == "__main__":
                         help="指定输出模型的名称，不指定则使用默认名称")
     parser.add_argument("--shuffle_data", action="store_true", 
                         help="是否打乱训练数据，默认不打乱")
+    parser.add_argument("--save_per_epoch", action="store_true",
+                        help="是否在每个epoch结束时保存模型，文件名格式为 {model_name}_ep{epoch}.pth")
     args = parser.parse_args()
 
-    lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=args.use_moe)
+    lm_config = MiniMindConfig(
+        hidden_size=args.hidden_size, 
+        num_hidden_layers=args.num_hidden_layers, 
+        num_attention_heads=args.num_attention_heads,
+        num_key_value_heads=args.num_key_value_heads,
+        use_moe=args.use_moe
+    )
     args.save_dir = os.path.join(args.out_dir)
     os.makedirs(args.save_dir, exist_ok=True)
     os.makedirs(args.out_dir, exist_ok=True)
@@ -231,3 +271,7 @@ if __name__ == "__main__":
         if ddp and train_sampler is not None:
             train_sampler.set_epoch(epoch)
         train_epoch(epoch, wandb)
+        
+        # 按epoch保存模型
+        if args.save_per_epoch:
+            save_model(model, lm_config, args, epoch=epoch)
